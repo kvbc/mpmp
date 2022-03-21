@@ -97,7 +97,6 @@ static inline char PE_advChar (struct mp_ProcessEnv* pe) {
  */
 
 // expand a macro definition
-// def & deflen must be known
 static int PE_expand (struct mp_ProcessEnv* pe, struct mp_Macro* macro)
 {
 	// expanded definition
