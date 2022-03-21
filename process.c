@@ -53,9 +53,9 @@ void mp_PE_init (
 
 	pe->macrotop = 0;
 	pe->macroargstop = 0;
+	pe->fn = fn;
 
 	pe->ctx.src = src;
-	pe->ctx.fn = fn;
 	pe->ctx.outBuff = outBuff;
 	pe->ctx.endch = endch;
 
