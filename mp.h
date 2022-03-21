@@ -30,14 +30,14 @@
 #define MP_PRINT_WARNING(frmt, ...)			  (printf(("Warning: " frmt "\n") __VA_OPT__(,) __VA_ARGS__))
 #define MP_PRINT_PROCESS_ERROR(pc, frmt, ...) (MP_PRINT_ERROR(frmt " at offset %u (ln:%u col:%u), while processing file \"%s\"" __VA_OPT__(,) __VA_ARGS__, (pc)->state.srcofs + 1, (pc)->state.ln, (pc)->state.srcofs - (pc)->state.lnsidx + 1, (pc)->ctx.fn))
 
-// file
-int mp_file_read  (FILE* f, const char* filename, char* buff, char** optBuff, long* flenPtr, long offset, size_t readlen, MP_BOOL nullterm);
-int mp_file_write (FILE* f, const char* filename, const char* buff, size_t len);
-
 struct mp_String {
 	const char* buff;
 	size_t len;
 };
+
+// file
+int mp_file_read  (FILE* f, const char* filename, char* buff, char** optBuff, long* flenPtr, long offset, size_t readlen, MP_BOOL nullterm);
+int mp_file_write (FILE* f, const char* filename, const char* buff, size_t len);
 
 /*
  *
