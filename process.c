@@ -5,6 +5,7 @@
  * Macro-processor's backend
  * 
  * ============== NOTES ==============
+ * -                 probably not the best idea to copy the entire state and context of an environment
  * - process       : wasting memory "ignoring" macros (when writing macro definitions to the output buffer), instead of popping them off
  * - PE_find_macro : perhaps hash macro names for increased performance
  *
