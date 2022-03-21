@@ -1,0 +1,18 @@
+Nested function-like macros
+Hope i didn't mess up the alphabet, lol
+
+#define A(a,b) a + b
+#define B(c,d) A(c,d)
+#define C(e,f) B(e,f)
+#define D(g,h) C(g,h)
+#define E(i,j) D(i,j)
+#define F(k,l) E(k,l)
+#define G(m,n) F(m,n)
+#define H(o,p) G(o,p)
+#define I(q,r) H(q,r)
+#define J(s,t) I(s,t)
+#define K(u,v) J(u,v)
+#define L(w,x) K(w,x)
+#define M(y,z) L(y,z)
+
+M(12, 35)
