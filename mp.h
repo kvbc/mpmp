@@ -31,7 +31,7 @@
 #define MP_PRINT_PROCESS_ERROR(pe, frmt, ...) (MP_PRINT_ERROR(frmt " at offset %u (ln:%u col:%u), while processing file \"%s\"" __VA_OPT__(,) __VA_ARGS__, (pe)->state.srcofs + 1, (pe)->state.ln, (pe)->state.srcofs - (pe)->state.lnsidx + 1, (pe)->fn))
 
 struct mp_String {
-	const char* buff;
+	char* buff;
 	size_t len;
 };
 
