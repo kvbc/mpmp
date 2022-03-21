@@ -168,14 +168,14 @@ static MP_BOOL is_wordbegc (char c) {
 	return (
 		(c == '_') ||
 		isalpha(c)
-	);
+	) ? MP_TRUE : MP_FALSE;
 }
 
 static MP_BOOL is_wordc (char c) {
 	return (
 		(c == '_') ||
 		isalnum(c)
-	);
+	) ? MP_TRUE : MP_FALSE;
 }
 
 // read the word into state.word, state.wlen
