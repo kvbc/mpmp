@@ -5,7 +5,7 @@ I'm too stupid and couldn't get any general-purpose macro-processor out there to
 Obviously it's got lots of bugs and is quite inefficient, but it meets my needs
 
 # Usage
-src - source file
+src - source file  
 out - output file
 ```
 mpmp <src> <out>
