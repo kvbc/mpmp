@@ -62,7 +62,7 @@ void mp_PE_init (
 	PE_reset_state(pe);
 
 	if (readlen > outBuffLen)
-		MP_PRINT_WARNING("'readlen' (%zu) exceeds 'outlen' (%zu) for '%s'", readlen, outBuffLen, fn);
+		MP_PRINT_WARNING("'readlen' (%u) exceeds 'outlen' (%u) for '%s'", readlen, outBuffLen, fn);
 	if (
 		(readlen == 0) ||
 		(readlen > outBuffLen)
