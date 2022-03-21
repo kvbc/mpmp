@@ -14,5 +14,5 @@ mpmp <src> <out>
 # Building
 Nothing too fancy
 ```
-gcc mp.c file.c process.c cstr.c
+gcc mp.c file.c process.c cstr.c -o mpmp -std=c11 -Wno-format -Wall -Wextra -pedantic
 ```
