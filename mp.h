@@ -28,7 +28,7 @@
 
 #define MP_PRINT_ERROR(frmt, ...)             (printf(("Error: "   frmt "\n") __VA_OPT__(,) __VA_ARGS__))
 #define MP_PRINT_WARNING(frmt, ...)			  (printf(("Warning: " frmt "\n") __VA_OPT__(,) __VA_ARGS__))
-#define MP_PRINT_PROCESS_ERROR(pc, frmt, ...) (MP_PRINT_ERROR(frmt " at offset %u (ln:%u col:%u), while processing file \"%s\"" __VA_OPT__(,) __VA_ARGS__, (pc)->state.srcofs + 1, (pc)->state.ln, (pc)->state.srcofs - (pc)->state.lnsidx + 1, (pc)->ctx.fn))
+#define MP_PRINT_PROCESS_ERROR(pe, frmt, ...) (MP_PRINT_ERROR(frmt " at offset %u (ln:%u col:%u), while processing file \"%s\"" __VA_OPT__(,) __VA_ARGS__, (pe)->state.srcofs + 1, (pe)->state.ln, (pe)->state.srcofs - (pe)->state.lnsidx + 1, (pe)->fn))
 
 struct mp_String {
 	const char* buff;
@@ -71,13 +71,13 @@ struct mp_ProcessState {
 
 struct mp_ProcessContext {
 	const char* src;
-	const char* fn;
 	char* outBuff;
 	size_t readlen;
 	int endch;
 };
 
 struct mp_ProcessEnv {
+	const char* fn;
 	struct mp_ProcessState state;
 	struct mp_ProcessContext ctx;
 	size_t macrotop;
