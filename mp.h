@@ -2,6 +2,9 @@
  *
  * mp.h
  * Global declarations and definitions
+ *
+ * ============== NOTES ==============
+ * the MP_PRINT_PROCESS_ERROR macro is probably showing completely incorrect values, too bad
  * 
  */
 
