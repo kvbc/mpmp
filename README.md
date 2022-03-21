@@ -14,5 +14,5 @@ mpmp <src> <out>
 # Building
 Nothing too fancy
 ```
-gcc cstr.c mp.c file.c process.c
+gcc mp.c file.c process.c cstr.c
 ```
