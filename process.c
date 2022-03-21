@@ -76,7 +76,7 @@ void mp_PE_free (struct mp_ProcessEnv* pe)
 	PE_pop_macros(pe, pe->macroargstop);	
 }
 
-// helpers for moving in the source
+// helpers for moving in the source buffer
 static inline const char* PE_charPtr (struct mp_ProcessEnv* pe) {
 	return &pe->ctx.src[pe->state.srcofs];
 }
