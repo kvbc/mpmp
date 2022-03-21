@@ -323,7 +323,7 @@ static int PE_push_macro_delim (struct mp_ProcessEnv* pe, MP_BOOL params, size_t
 		}
 
 		struct mp_String* arg = &pe->macroargs[pe->macroargstop++];
-		arg->buff = pe->state.word;
+		arg->buff = (char*)pe->state.word;
 		arg->len = pe->state.wlen;
 
 		PE_skip_Hws(pe);
@@ -434,7 +434,7 @@ static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL)
 					}
 
 					PE_skip_Hws(pe);
-					macro->def = PE_charPtr(pe);
+					macro->def = (char*)PE_charPtr(pe);
 					PE_skip_line(pe);
 					macro->deflen = PE_charPtr(pe) - macro->def - pe->state.nllen;
 					
