@@ -3,11 +3,6 @@
  * process.c
  * 
  * Macro-processor's backend
- * 
- * ============== NOTES ==============
- * -                 probably not the best idea to copy the entire state and context of an environment
- * - process       : wasting memory "ignoring" macros (when writing macro definitions to the output buffer), instead of popping them off
- * - PE_find_macro : perhaps hash macro names for increased performance
  *
  */
 
@@ -16,8 +11,9 @@
 #include <ctype.h>
 #include <string.h>
 
-static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL);
-static void PE_pop_macros (struct mp_ProcessEnv* pe, size_t count);
+static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL, MP_BOOL ismain);
+static char PE_advance (struct mp_ProcessEnv* pe);
+static int PE_next_delim (struct mp_ProcessEnv* pe, enum mp_DelimWhat what);
 
 /*
  *
@@ -25,7 +21,7 @@ static void PE_pop_macros (struct mp_ProcessEnv* pe, size_t count);
  * 
  */
 
-// set PE's state defaults
+// set state defaults
 static void PE_reset_state (struct mp_ProcessEnv* pe)
 {
 	pe->state.ln = 1;
@@ -51,8 +47,9 @@ void mp_PE_init (
 	if (fn == NULL)
 		fn = "UNNAMED";
 
-	pe->macrotop = 0;
-	pe->macroargstop = 0;
+	pe->macrostop = 0;
+	pe->stringstop = 0;
+	pe->tofreetop = 0;
 	pe->fn = fn;
 
 	pe->ctx.src = src;
@@ -62,7 +59,7 @@ void mp_PE_init (
 	PE_reset_state(pe);
 
 	if (readlen > outBuffLen)
-		MP_PRINT_WARNING("'readlen' (%u) exceeds 'outlen' (%u) for '%s'", readlen, outBuffLen, fn);
+		MP_PRINT_WARNING("'readlen' (%zu) exceeds 'outlen' (%zu) for '%s'", readlen, outBuffLen, fn);
 	if (
 		(readlen == 0) ||
 		(readlen > outBuffLen)
@@ -71,12 +68,19 @@ void mp_PE_init (
 	else pe->ctx.readlen = readlen;
 }
 
-void mp_PE_free (struct mp_ProcessEnv* pe)
+// free pe->tofree
+static void PE_free_tofree (struct mp_ProcessEnv* pe)
 {
-	PE_pop_macros(pe, pe->macroargstop);	
+	while (pe->tofreetop > 0)
+		free(pe->tofree[--pe->tofreetop]);
 }
 
-// helpers for moving in the source buffer
+/*
+ *
+ * PE :: Source helpers
+ * 
+ */
+
 static inline const char* PE_charPtr (struct mp_ProcessEnv* pe) {
 	return &pe->ctx.src[pe->state.srcofs];
 }
@@ -90,33 +94,102 @@ static inline char PE_advChar (struct mp_ProcessEnv* pe) {
 	return * PE_advCharPtr(pe);
 }
 
+// is word beggining
+static MP_BOOL is_wordbegc (char c) {
+	return (
+		(c == '_') ||
+		isalpha(c)
+	) ? MP_TRUE : MP_FALSE;
+}
+// is word char (not beggining)
+static MP_BOOL is_wordc (char c) {
+	return (
+		(c == '_') ||
+		isalnum(c)
+	) ? MP_TRUE : MP_FALSE;
+}
+// is a horizontal whitespace
+static MP_BOOL is_Hws (char c) {
+	return (
+		(c == ' ')  ||
+        (c == '\t') ||
+		(c == '\v') ||
+		(c == '\f')
+	) ? MP_TRUE : MP_FALSE;
+}
+// skip horizontal whitespace
+static void PE_skip_Hws (struct mp_ProcessEnv* pe)
+{
+	while (
+		(!pe->state.eof) &&
+		(is_Hws(PE_char(pe)))
+	) PE_advance(pe);
+}
+
+static void PE_skip_line (struct mp_ProcessEnv* pe)
+{
+	size_t ln = pe->state.ln;
+	while (
+		(!pe->state.eof) &&
+		(pe->state.ln == ln)
+	) PE_advance(pe);
+}
+
 /*
  *
- * PE :: Source
+ * PE :: Output
+ * 
+ */
+
+static void PE_writestr (struct mp_ProcessEnv* pe, const char* str, size_t len)
+{
+	strncpy(&pe->ctx.outBuff[pe->state.outofs], str, len);
+	pe->state.outofs += len;
+}
+
+// write from pe->writestart to now
+static void PE_writeall (struct mp_ProcessEnv* pe)
+{
+	if (pe->state.writestart == NULL)
+		return;
+	if (PE_charPtr(pe) == pe->state.writestart) {
+		pe->state.writestart = NULL;
+		return;
+	}
+	PE_writestr(pe, pe->state.writestart, PE_charPtr(pe) - pe->state.writestart - pe->state.nllen);
+	pe->state.writestart = NULL;
+}
+
+// write latest new-line
+static inline void PE_writenl (struct mp_ProcessEnv* pe)
+{
+	PE_writestr(pe, pe->state.nlstr, pe->state.nllen);
+}
+
+/*
+ *
+ * PE :: Source analysis
  *
  */
 
-// expand a macro definition
-static int PE_expand (struct mp_ProcessEnv* pe, struct mp_Macro* macro)
+// read the word into state.word, state.wlen
+// returns MP_OK/MP_BAD
+static int PE_word (struct mp_ProcessEnv* pe)
 {
-	// expanded definition
-	char* expdef = malloc(sizeof(char) * MP_MAX_DEF_LEN); // freed in PE_pop_macros
+	int ret = MP_OK;
+	pe->state.word = PE_charPtr(pe);
+	char c = PE_char(pe);
 
-	struct mp_ProcessState oldps = pe->state;
-	struct mp_ProcessContext oldpc = pe->ctx;
-	pe->ctx.outBuff = expdef;
-	pe->ctx.src = macro->def;
-	pe->ctx.readlen = macro->deflen;
-	pe->ctx.endch = MP_ENDCH_NONE;
-	PE_reset_state(pe);
-	if (process(pe, MP_FALSE) == MP_BAD)
-		return MP_BAD;
-	macro->def = expdef;
-	macro->deflen = pe->state.outofs;
-	pe->ctx = oldpc;
-	pe->state = oldps;
+	if (!is_wordbegc(c)) {
+		c = PE_advance(pe);
+		ret = MP_BAD;
+	}
 
-	return MP_OK;
+	while (is_wordc(c))
+		c = PE_advance(pe);
+	pe->state.wlen = PE_charPtr(pe) - pe->state.word - pe->state.nllen;
+
+	return ret;
 }
 
 // advance to the next character
@@ -164,103 +237,36 @@ static char PE_advance (struct mp_ProcessEnv* pe)
 	return c;
 }
 
-static MP_BOOL is_wordbegc (char c) {
-	return (
-		(c == '_') ||
-		isalpha(c)
-	) ? MP_TRUE : MP_FALSE;
-}
-
-static MP_BOOL is_wordc (char c) {
-	return (
-		(c == '_') ||
-		isalnum(c)
-	) ? MP_TRUE : MP_FALSE;
-}
-
-// read the word into state.word, state.wlen
-// returns MP_OK/MP_BAD
-static int PE_word (struct mp_ProcessEnv* pe)
-{
-	int ret = MP_OK;
-	pe->state.word = PE_charPtr(pe);
-	char c = PE_char(pe);
-
-	if (!is_wordbegc(c)) {
-		c = PE_advance(pe);
-		ret = MP_BAD;
-	}
-
-	while (is_wordc(c))
-		c = PE_advance(pe);
-	pe->state.wlen = PE_charPtr(pe) - pe->state.word - pe->state.nllen;
-
-	return ret;
-}
-
-// is character a horizontal whitespace
-static MP_BOOL is_Hws (char c) {
-	return (
-		(c == ' ')  ||
-        (c == '\t') ||
-		(c == '\v') ||
-		(c == '\f')
-	) ? (MP_TRUE) : (MP_FALSE);
-}
-
-// skip horizontal whitespace
-static void PE_skip_Hws (struct mp_ProcessEnv* pe)
-{
-	while (
-		(!pe->state.eof) &&
-		(is_Hws(PE_char(pe)))
-	) PE_advance(pe);
-}
-
-static void PE_skip_line (struct mp_ProcessEnv* pe)
-{
-	size_t ln = pe->state.ln;
-	while (
-		(!pe->state.eof) &&
-		(pe->state.ln == ln)
-	) PE_advance(pe);
-}
-
 /*
  *
  * PE :: Macros
  * 
  */
 
-static void PE_pop_macros (struct mp_ProcessEnv* pe, size_t count)
-{
-	while (count--)
-	{
-		free(pe->macros[pe->macrotop--].def);
-	}
-}
-
+// returns macro/NULL
 static struct mp_Macro* PE_next_macro (struct mp_ProcessEnv* pe)
 {
-	if (pe->macrotop >= MP_MAX_MACROS) {
+	if (pe->macrostop >= MP_MAX_MACROS) {
 		MP_PRINT_PROCESS_ERROR(pe, "Maximum number of macros (%u) exceeded", MP_MAX_MACROS);
 		return NULL;
 	}
-	struct mp_Macro* macro = &pe->macros[pe->macrotop++];
+
+	struct mp_Macro* macro = &pe->macros[pe->macrostop++];
+	macro->exp = MP_FALSE;
 	macro->isfunc = MP_FALSE;
 	macro->def = NULL;
 	macro->deflen = 0;
 	macro->name = NULL;
 	macro->namelen = 0;
-	macro->args = NULL;
-	macro->argslen = 0;
+	macro->params = NULL;
+	macro->paramc = 0;
+
 	return macro;
 }
 
-// if a macro with the given name exists, return it, otherwise return NULL
 static struct mp_Macro* PE_find_macro (struct mp_ProcessEnv* pe, const char* name, size_t len)
 {
-	for (size_t i = 0; i < pe->macrotop; i++)
+	for (size_t i = 0; i < pe->macrostop; i++)
 	{
 		struct mp_Macro* macro = &pe->macros[i];
 		if (mp_cstr_eq(name, len, macro->name, macro->namelen) == MP_TRUE)
@@ -269,110 +275,154 @@ static struct mp_Macro* PE_find_macro (struct mp_ProcessEnv* pe, const char* nam
 	return NULL;
 }
 
-// if params == MP_TRUE, push paramters onto pe->macroargs, otherwise push arguments
-// if count != NULL, set it to the number of pushed stuff
+// expand macro
+// store result in pe->state.word, pe->state.wlen
 // returns MP_OK/MP_BAD
-static int PE_push_macro_delim (struct mp_ProcessEnv* pe, MP_BOOL params, size_t* count)
+static int PE_expand_macro (struct mp_ProcessEnv* pe, struct mp_Macro* macro)
 {
-	size_t oldtop = pe->macroargstop;
+	if (macro == NULL)
+		return MP_OK;
 
-	for (;;) {
-		PE_skip_Hws(pe);
+	pe->state.word = NULL;
+	pe->state.wlen = 0;
 
-		if (PE_char(pe) == ')') {
-			PE_advance(pe);
-			break;
-		}
-
-		if (params == MP_TRUE) {
-			if (PE_word(pe) == MP_BAD) {
-				MP_PRINT_PROCESS_ERROR(pe, "Malformed macro parameter \"%.*s\"", pe->state.wlen, pe->state.word);
-				return MP_BAD;
-			}
-		} else {
-			char c = PE_char(pe);
-			pe->state.word = PE_charPtr(pe);
-			pe->state.wlen = 0;
-			int br = 1;
-			for (;;) {
-				c = PE_advance(pe);
-				if (pe->state.eof == MP_TRUE) {
-					MP_PRINT_PROCESS_ERROR(pe, "Unexpected EOF while processing macro arguments");
-					return MP_BAD;
-				}
-				if (c == '(')
-					br++;
-				else if (c == ')')
-					br--;
-				if (br < 0) {
-					MP_PRINT_PROCESS_ERROR(pe, "Unmatched parentheses");
-					return MP_BAD;
-				}
-				if (br == 0) // ending )
-					break;
-				if (br == 1)
-				if (c == ',')
-					break;
-			}
-			pe->state.wlen = PE_charPtr(pe) - pe->state.word;
-		}
-		
-		if (pe->macroargstop >= MP_MAX_MACRO_ARGS) {
-			MP_PRINT_PROCESS_ERROR(pe, "Maximum number of macro arguments (%u) exceeded", MP_MAX_MACRO_ARGS);
-			return MP_BAD;
-		}
-
-		struct mp_String* arg = &pe->macroargs[pe->macroargstop++];
-		arg->buff = (char*)pe->state.word;
-		arg->len = pe->state.wlen;
-
-		PE_skip_Hws(pe);
-		char c = PE_char(pe);
+	if (PE_char(pe) == '(') {
 		PE_advance(pe);
 
-		if (c == ')')
-			break;
-		if (c != ',') {
-			MP_PRINT_PROCESS_ERROR(pe, "Missing separator ',' while processing macro");
+		size_t argc = 0;
+		size_t oldmacrostop = pe->macrostop;
+
+		// turn arguments into macros, calculate argc
+		for (size_t i = 0;; i++) {
+			int ret = PE_next_delim(pe, MP_DELIM_ARGS);
+			if (ret == MP_BAD)
+				return MP_BAD;
+
+			struct mp_String* param = &macro->params[i];
+			struct mp_Macro* argm = PE_next_macro(pe);
+			if (argm == NULL)
+				return MP_BAD;
+			argm->name = param->buff;
+			argm->namelen = param->len;
+			argm->def = pe->state.word;
+			argm->deflen = pe->state.wlen;
+			argc++;
+
+			if (ret == MP_END)
+				break;
+		}
+
+		char* outbuff = malloc(sizeof(char) * MP_MAX_DEF_LEN);
+
+		struct mp_ProcessState oldps = pe->state;
+		struct mp_ProcessContext oldpc = pe->ctx;
+		pe->ctx.src = macro->def;
+		pe->ctx.readlen = macro->deflen;
+		pe->ctx.outBuff = outbuff;
+		pe->ctx.endch = MP_ENDCH_NONE;
+		PE_reset_state(pe);
+		if (process(pe, MP_FALSE, MP_FALSE) == MP_BAD) {
+			free(outbuff);
 			return MP_BAD;
 		}
+		oldps.word = outbuff;
+		oldps.wlen = pe->state.outofs;
+		pe->ctx = oldpc;
+		pe->state = oldps;
+
+		// TODO this sucks, wasting memory
+		for (size_t i = 0; i < argc; i++)
+			pe->macros[oldmacrostop + i].namelen = 0; // ignore macro arguments
+
+		return MP_OK;
 	}
 
-	if (count != NULL)
-		*count = pe->macroargstop - oldtop;
+	char* outbuff = malloc(sizeof(char) * MP_MAX_DEF_LEN);
+
+	struct mp_ProcessState oldps = pe->state;
+	struct mp_ProcessContext oldpc = pe->ctx;
+	pe->ctx.src = macro->def;
+	pe->ctx.readlen = macro->deflen;
+	pe->ctx.outBuff = outbuff;
+	pe->ctx.endch = MP_ENDCH_NONE;
+	PE_reset_state(pe);
+	if (process(pe, MP_FALSE, MP_FALSE) == MP_BAD) {
+		free(outbuff);
+		return MP_BAD;
+	}
+	oldps.word = outbuff;
+	oldps.wlen = pe->state.outofs;
+	pe->ctx = oldpc;
+	pe->state = oldps;
 
 	return MP_OK;
 }
 
-/*
- *
- * PE :: Output
- * 
- */
-
-static void PE_writestr (struct mp_ProcessEnv* pe, const char* str, size_t len)
+// read all characters from start to )/,/EOF
+// result stored in pe->state.word and pe->state.wlen
+static void PE_read_delim (struct mp_ProcessEnv* pe, const char* start)
 {
-	strncpy(&pe->ctx.outBuff[pe->state.outofs], str, len);
-	pe->state.outofs += len;
+	char c = PE_char(pe);
+	while (
+		(c != ')') &&
+		(c != ',') &&
+		(pe->state.eof == MP_FALSE)
+	) c = PE_advance(pe);
+	pe->state.word = start;
+	pe->state.wlen = PE_charPtr(pe) - start - pe->state.nllen;
 }
 
-// write from pe->writestart to now
-static void PE_writeall (struct mp_ProcessEnv* pe)
+// opening '(' must be read
+// read arg (what == MP_DELIM_ARGS) or param (what == MP_DELIM_PARAMS)
+// result stored in pe->state.word and pe->state.wlen
+// returns MP_OK/MP_BAD or MP_END if ended
+static int PE_next_delim (struct mp_ProcessEnv* pe, enum mp_DelimWhat what)
 {
-	if (pe->state.writestart == NULL)
-		return;
-	if (PE_charPtr(pe) == pe->state.writestart) {
-		pe->state.writestart = NULL;
-		return;
+	PE_skip_Hws(pe);
+
+	if (PE_char(pe) == ')') {
+		PE_advance(pe);
+		return MP_END;
 	}
-	PE_writestr(pe, pe->state.writestart, PE_charPtr(pe) - pe->state.writestart - pe->state.nllen);
-	pe->state.writestart = NULL;
-}
 
-// write latest new-line
-static inline void PE_writenl (struct mp_ProcessEnv* pe)
-{
-	PE_writestr(pe, pe->state.nlstr, pe->state.nllen);
+	if (what == MP_DELIM_PARAMS)
+	{
+		if (PE_word(pe) == MP_BAD) { // result
+			MP_PRINT_PROCESS_ERROR(pe, "Malformed macro parameter \"%.*s\"", pe->state.wlen, pe->state.word);
+			return MP_BAD;
+		}
+	}
+	else { // MP_DELIM_ARGS
+		const char* start = PE_charPtr(pe);
+		if (PE_word(pe) == MP_OK) { // macro/result
+			struct mp_Macro* macro = PE_find_macro(pe, pe->state.word, pe->state.wlen);
+			if (macro != NULL) {
+				if (PE_expand_macro(pe, macro) == MP_OK) { // result
+					if (pe->tofreetop >= MP_MAX_MACRO_EXPS) {
+						MP_PRINT_PROCESS_ERROR(pe, "Maximum number of macro expansions (%u) exceeded", MP_MAX_MACRO_EXPS);
+						return MP_BAD;
+					}
+					pe->tofree[pe->tofreetop++] = pe->state.word; // allocated expanded definition, free later
+				}
+				else PE_read_delim(pe, start); // result
+			}
+			else PE_read_delim(pe, start); // result
+		}
+		else PE_read_delim(pe, start); // result
+	}
+
+	PE_skip_Hws(pe);
+	char c = PE_char(pe);
+	PE_advance(pe);
+
+	if (c == ')')
+		return MP_END;
+	if (c != ',') {
+		MP_PRINT_PROCESS_ERROR(pe, "Missing separator ',' while processing macro");
+		return MP_BAD;
+	}
+
+	return MP_OK;
 }
 
 /*
@@ -383,10 +433,10 @@ static inline void PE_writenl (struct mp_ProcessEnv* pe)
 
 int mp_process (struct mp_ProcessEnv* pe)
 {
-	return process(pe, MP_TRUE);
+	return process(pe, MP_TRUE, MP_TRUE);
 }
 
-static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL)
+static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL, MP_BOOL ismain)
 {
 	for (; !pe->state.eof ;)
 	{
@@ -406,40 +456,56 @@ static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL)
 		 * word
 		 * 
 		 */
-		else if (isalpha(c)) {
+		else if (is_wordbegc(c)) {
 			PE_writeall(pe);
 			PE_word(pe);
 			if (pe->state.isinstr == MP_TRUE) {
 				pe->state.isinstr = MP_FALSE;
 				if (mp_cstr_eq(pe->state.word, pe->state.wlen, "define", 6) == MP_TRUE) {
 					PE_skip_Hws(pe);
-					if(PE_word(pe) == MP_BAD) {
+					if (PE_word(pe) == MP_BAD) {
 						MP_PRINT_PROCESS_ERROR(pe, "Malformed macro identifier \"%.*s\"", pe->state.wlen, pe->state.word);
 						return MP_BAD;
 					}
 					PE_skip_Hws(pe);
 					
+					// init macro
 					struct mp_Macro* macro = PE_next_macro(pe);
 					if (macro == NULL)
 						return MP_BAD;
 					macro->name = pe->state.word;
 					macro->namelen = pe->state.wlen;
 
+					// init function-like macro
 					if (PE_char(pe) == '(') {
 						PE_advance(pe);
 						macro->isfunc = MP_TRUE;
-						macro->args = &pe->macroargs[pe->macroargstop];
-						if (PE_push_macro_delim(pe, MP_TRUE, &macro->argslen) == MP_BAD)
-							return MP_BAD;
+						macro->params = &pe->strings[pe->stringstop];
+						
+						for (int ret;;) {
+							ret = PE_next_delim(pe, MP_DELIM_PARAMS);
+							if (ret == MP_BAD)
+								return MP_BAD;
+
+							if (pe->stringstop >= MP_MAX_MACROS) {
+								MP_PRINT_PROCESS_ERROR(pe, "Maximum number of strings (%u) exceeded", MP_MAX_MACROS);
+								return MP_BAD;
+							}
+							struct mp_String* marg = &pe->strings[pe->stringstop++];
+							marg->buff = pe->state.word;
+							marg->len = pe->state.wlen;
+							
+							macro->paramc++;
+							if (ret == MP_END)
+								break;
+						}
 					}
 
+					// set macro's definition
 					PE_skip_Hws(pe);
-					macro->def = (char*)PE_charPtr(pe);
+					macro->def = PE_charPtr(pe);
 					PE_skip_line(pe);
 					macro->deflen = PE_charPtr(pe) - macro->def - pe->state.nllen;
-					
-					if (PE_expand(pe, macro) == MP_BAD)
-						return MP_BAD;
 				}
 				else {
 					MP_PRINT_PROCESS_ERROR(pe, "Undefined instruction \"%.*s\"", pe->state.wlen, pe->state.word);
@@ -448,58 +514,13 @@ static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL)
 			}
 			else {
 				struct mp_Macro* macro = PE_find_macro(pe, pe->state.word, pe->state.wlen);
-
-				if (macro != NULL)
-				if (PE_char(pe) == '(') {
-					PE_advance(pe);
-
-					size_t argc;
-					size_t oldmacrotop = pe->macrotop;
-					size_t oldtop = pe->macroargstop;
-					if (PE_push_macro_delim(pe, MP_FALSE, &argc) == MP_BAD)
-						return MP_BAD;
-
-					for (size_t i = 0; i < argc; i++) {
-						struct mp_String* param = &macro->args[i];
-						struct mp_String* arg = &pe->macroargs[oldtop + i];
-						struct mp_Macro* argm = PE_next_macro(pe);
-						if (argm == NULL)
-							return MP_BAD;
-
-						argm->name = param->buff;
-						argm->namelen = param->len;
-						argm->def = arg->buff;
-						argm->deflen = arg->len;
-
-						if (PE_expand(pe, argm) == MP_BAD)
-							return MP_BAD;
-					}
-
-					struct mp_ProcessState oldps = pe->state;
-					struct mp_ProcessContext oldpc = pe->ctx;
-					pe->ctx.src = macro->def;
-					pe->ctx.readlen = macro->deflen;
-					pe->ctx.endch = MP_ENDCH_NONE;
-					PE_reset_state(pe);
-					pe->state.outofs = oldps.outofs;
-					if (process(pe, MP_FALSE) == MP_BAD)
-						return MP_BAD;
-					oldps.outofs = pe->state.outofs;
-					pe->ctx = oldpc;
-					pe->state = oldps;
-
-					// TODO this sucks, wasting memory
-					for (size_t i = 0; i < argc; i++)
-						pe->macros[oldmacrotop + i].namelen = 0;
-
-					continue;
-				}
-
-				if (macro == NULL)
-					PE_writestr(pe, pe->state.word, pe->state.wlen);
-				else
-					PE_writestr(pe, macro->def, macro->deflen);
-				if (writeNL)
+				if (PE_expand_macro(pe, macro) == MP_BAD)
+					return MP_BAD;
+				PE_writestr(pe, pe->state.word, pe->state.wlen);
+				if (ismain == MP_TRUE)
+					PE_free_tofree(pe);
+				
+				if (writeNL == MP_TRUE)
 					PE_writenl(pe);
 			}
 		}
