@@ -15,4 +15,5 @@ Hope i didn't mess up the alphabet, lol
 #define L(w,x) K(w,x)
 #define M(y,z) L(y,z)
 
-M(12, 35)
+Expecting : 12 + 35
+Got       : M(12, 35)
