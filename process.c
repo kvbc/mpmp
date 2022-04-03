@@ -156,7 +156,7 @@ static void PE_writeall (struct mp_ProcessEnv* pe)
 		pe->state.writestart = NULL;
 		return;
 	}
-	PE_writestr(pe, pe->state.writestart, PE_charPtr(pe) - pe->state.writestart - pe->state.nllen);
+	PE_writestr(pe, pe->state.writestart, PE_charPtr(pe) - pe->state.writestart /* - pe->state.nllen*/);
 	pe->state.writestart = NULL;
 }
 
