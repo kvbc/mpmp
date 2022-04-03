@@ -95,6 +95,7 @@ struct mp_ProcessEnv {
 #define MP_ENDCH_NONE SCHAR_MIN - 1
 #define MP_ENDCH_NL   SCHAR_MIN - 2
 void mp_PE_init (struct mp_ProcessEnv* pe, const char* src, const char* fn, char* outBuff, size_t outBuffLen, size_t readlen, int endch);
+void mp_PE_free (struct mp_ProcessEnv* pe);
 int mp_process (struct mp_ProcessEnv* pe);
 
 // cstr

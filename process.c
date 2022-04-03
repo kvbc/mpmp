@@ -69,7 +69,7 @@ void mp_PE_init (
 }
 
 // free pe->tofree
-static void PE_free_tofree (struct mp_ProcessEnv* pe)
+void mp_PE_free (struct mp_ProcessEnv* pe)
 {
 	while (pe->tofreetop > 0)
 		free(pe->tofree[--pe->tofreetop]);
@@ -518,7 +518,7 @@ static int process (struct mp_ProcessEnv* pe, MP_BOOL writeNL, MP_BOOL ismain)
 					return MP_BAD;
 				PE_writestr(pe, pe->state.word, pe->state.wlen);
 				if (ismain == MP_TRUE)
-					PE_free_tofree(pe);
+					mp_PE_free(pe);
 				
 				if (writeNL == MP_TRUE)
 					PE_writenl(pe);

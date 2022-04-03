@@ -38,6 +38,7 @@ int main (int argc, char* argv[])
 		mp_PE_init(&pe, src, srcfn, out, flen, 0, MP_ENDCH_NONE);
 		if (mp_process(&pe) == MP_OK)
 			mp_file_write(NULL, outfn, pe.ctx.outBuff, pe.state.outofs);
+		mp_PE_free(&pe);
 		free(out);
 	}
 
